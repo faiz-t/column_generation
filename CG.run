@@ -1,0 +1,323 @@
+model CG.mod;
+data CG.dat;
+
+
+option solver cplexamp; 
+option presolve 0;
+option solution_round 3;
+
+set S4{i in T} default {} ordered in T;
+set S5{i in T} default {} ordered in T;
+
+let {i in T}S4[i]:= ADJ[i];
+let {i in T}S5[i]:= {i} union {S4[i]};
+
+set LINKS{i in T} := {j in T, k in ADJ[i]: j=i and (j,k) in G};
+set LINKS2{i in T} := {j in S5[i], k in S5[i]: ord(j,T) = ord(k,T) and ord(i,T)=ord(k,T)}; 
+set LINKSET:= union {i in T} LINKS[i];
+
+param LINKS_COST{i in T,j in ADJ[i]}:= TW[j]-dur[j]-TW[i]+d[i,j];
+set OL{i in T}:= {j in ADJ[i]: LINKS_COST[i,j]=min{k in ADJ[i]}LINKS_COST[i,k]};
+set OH{i in T}:= {j in ADJ[i]: LINKS_COST[i,j]=max{k in ADJ[i]}LINKS_COST[i,k]};
+
+#param lo{i in T}:=min{j in ADJ[i]:LINKS_COST[i,j]};
+#param hi{i in T:=max{j in ADJ[i]:LINKS_COST[i,j]};
+
+#set S2{i in T} ordered by {j in ADJ[i]}lo[i,j]..hi[i,j]:=ADJ[i];
+
+set NEWSUB{i in T} ordered;
+set EXTEND{i in T} ordered;
+set SS4 {i in T} ordered default{};
+param cost4 {i in T} default 0;
+
+for {i in T}{
+	let NEWSUB[i] := {};
+	let EXTEND[i] :={i};
+	repeat {
+ 	 	let NEWSUB[i] := NEWSUB[i] union EXTEND[i];
+ 	 	if card(S4[last(NEWSUB[i])])!=0 then{
+ 	 		let EXTEND[i] := {ll in (OL[last(NEWSUB[i])]) }
+     		}
+     	else  let EXTEND[i] := {};
+     } until card(EXTEND[i])=0;
+    let SS4[i] := NEWSUB[i];
+    let cost4[i] := TW[last(SS4[i])]-TW[i]+dur[i];
+  }
+
+param m{i in T}:=card(SS4[i]);
+param size{i in T} default m[i];
+param ntour{i in T} default 0;
+set NEWADJ{i in T,0..ntour[i]} ordered default ADJ[i];
+set NTR{i in T, 1..ntour[i]} ordered default {i};
+set OPT{i in T, 1..ntour[i]} default OL[i];
+
+set SS3 {i in T,1..ntour[i]} ordered default{};
+param cost3 {i in T,1..ntour[i]} default 0;
+
+
+for {i in T}{
+	repeat {let ntour[i]:=ntour[i]+1;
+		let NEWADJ[i,ntour[i]]:=NEWADJ[i,ntour[i]-1] ; 
+ 	 	let OPT[i,ntour[i]]:= {j in NEWADJ[i,ntour[i]]: LINKS_COST[i,j]=min{k in NEWADJ[i,ntour[i]]}LINKS_COST[i,k]}; 
+ 	 	
+		 repeat{	
+  			let NTR[i,ntour[i]] := NTR[i,ntour[i]] union OPT[i,ntour[i]];
+ 	 	
+ 	 		if card(S4[last(NTR[i,ntour[i]])])!=0 then{
+ 	 			let OPT[i,ntour[i]] := {ll in (OL[last(NTR[i,ntour[i]])]) }
+ 	 			#let OPT[i,ntour[i]] := {j in NEWADJ[i,ntour[i]]: LINKS_COST[i,j]=min{k in NEWADJ[i,ntour[i]]}LINKS_COST[i,k]};
+     			}
+     		else  let OPT[i,ntour[i]] := {};
+     	  } until card(OPT[i,ntour[i]]) = 0;
+     
+ 		if card(NEWADJ[i,ntour[i]])!=0 then{
+ 	 		#let OPT[i,ntour[i]]:={first(NEWADJ[i,ntour[i]])};
+ 	 		let OPT[i,ntour[i]]:={j in NEWADJ[i,ntour[i]]: LINKS_COST[i,j]=min{k in NEWADJ[i,ntour[i]]}LINKS_COST[i,k]}; 
+ 	 		let NEWADJ[i,ntour[i]]:=NEWADJ[i,ntour[i]] diff OPT[i,ntour[i]]; }
+ 		
+ 			let SS3[i,ntour[i]] := NTR[i,ntour[i]];
+    		let cost3[i,ntour[i]] := TW[last(SS3[i,ntour[i]])]-TW[i]+dur[i];
+ 		
+   } until card(NEWADJ[i,ntour[i]])=0;
+}
+
+param pathno{i in T}:=ntour[i];
+param pathnum:=sum{i in T}(ntour[i]);      #total number of taskset
+
+let ALLPATH:=1..pathnum;					#set of all tasksets
+
+for{j in ALLPATH}{
+	let pathnumcount:= pathnumcount + 1;
+	if pathnumcount> pathno[taskcount] then {
+		let taskcount:=taskcount+1;
+		let pathnumcount:= 1;
+		}
+	else let taskcount:=taskcount;
+ 		 let PATHSET[j]:=SS3[taskcount,pathnumcount];
+		 let Path_time[j]:=cost3[taskcount,pathnumcount];
+		}
+
+#generating binary parameter if task i is in taskset j
+
+########################################################
+#Generation of taskset consisting of 5 tasks
+
+set SS5 {i in T,1..card(S4[i])*(sum{j in S4[i],k in S4[j],l in S4[k]}card(S4[j])*card(S4[k])*card(S4[l]))};
+param cost5 {i in T,1..card(S4[i])*(sum{j in S4[i],k in S4[j],l in S4[k]}card(S4[j])*card(S4[k])*card(S4[l]))};
+param SS5count{i in T} default 0;
+
+for {i in T, i1 in S4[i], i2 in S4[i1], i3 in S4[i2],i4 in S4[i3]:
+(i,i1) in LINKS[i] and (i1,i2) in LINKS[i1] and (i2,i3) in LINKS[i2] and (i3,i4) in LINKS[i3]} {
+let SS5count[i] := SS5count[i] + 1;
+let SS5[i,SS5count[i]] := {i, i1,i2,i3,i4};
+let cost5[i,SS5count[i]] := TW[i4]-TW[i]+dur[i];
+#printf "\n %10.0f %10.0f %10.0f %10.0f %10.0f %10.3f\", i,i1,i2,i3,i4, cost5[i,SS5count[i]]> ./output.csv;
+}
+
+#Generation of taskset consisting of 4 tasks
+
+set SS6 {i in T,1..card(S4[i])*(sum{j in S4[i],k in S4[j],l in S4[k]}card(S4[j])*card(S4[k]))};
+param cost6 {i in T,1..card(S4[i])*(sum{j in S4[i],k in S4[j],l in S4[k]}card(S4[j])*card(S4[k]))};
+param SS6count{i in T} default 0;
+
+for {i in T, i1 in S4[i], i2 in S4[i1], i3 in S4[i2]:
+(i,i1) in LINKS[i] and (i1,i2) in LINKS[i1] and (i2,i3) in LINKS[i2]} {
+let SS6count[i] := SS6count[i] + 1;
+let SS6[i,SS6count[i]] := {i, i1,i2,i3};
+let cost6[i,SS6count[i]] := TW[i3]-TW[i]+dur[i];
+#printf "\n %10.0f %10.0f %10.0f %10.0f %10.3f\", i,i1,i2,i3, cost6[i,SS6count[i]]> ./output.csv;
+}
+
+#Generation of taskset consisting of 3 tasks
+
+set SS7 {i in T,1..card(S4[i])*(sum{j in S4[i]}card(S4[j]))};
+param cost7 {i in T,1..card(S4[i])*(sum{j in S4[i]}card(S4[j]))};
+param SS7count{i in T} default 0;
+
+for {i in T, i1 in S4[i], i2 in S4[i1]:
+(i,i1) in LINKS[i] and (i1,i2) in LINKS[i1]} {
+let SS7count[i] := SS7count[i] + 1;
+let SS7[i,SS7count[i]] := {i, i1,i2};
+let cost7[i,SS7count[i]] := TW[i2]-TW[i]+dur[i];
+#printf "\n %10.0f %10.0f %10.0f %10.3f \", i,i1,i2, cost7[i,SS7count[i]] > ./output.csv;
+}
+
+#Generation of taskset consisting of 2 tasks
+
+set SS8 {i in T,1..card(S4[i])};
+param cost8 {i in T,1..card(S4[i])};
+param SS8count{i in T} default 0;
+
+for {i in T, i1 in S4[i]:
+(i,i1) in LINKS[i]} {
+let SS8count[i] := SS8count[i] + 1;
+let SS8[i,SS8count[i]] := {i, i1};
+let cost8[i,SS8count[i]] := TW[i1]-TW[i]+dur[i];
+#printf "\n %10.0f %10.0f %10.3f \", i,i1, cost8[i,SS8count[i]] > ./output.csv;
+}
+
+#Generation of taskset consisting of 1 task
+
+set SS9 {i in T,1..ord(i,S5[i])};
+param cost9 {i in T,1..ord(i,S5[i])};
+param SS9count{i in T} default 0;
+
+for {i in T, i1 in S5[i]:(i,i1) in LINKS2[i]}{
+let SS9count[i] := SS9count[i] + 1;
+let SS9[i,SS9count[i]] := {i};
+let cost9[i,SS9count[i]] := dur[i];
+#printf "\n %10.0f %10.3f \", i, cost9[i,SS9count[i]] > ./output.csv;
+}
+
+param pathno1{i in T}:=SS5count[i]+SS6count[i]+SS7count[i]+SS8count[i]+SS9count[i];
+
+set path {i in T, j in 1..pathno1[i]};
+param pathcost {i in T, j in 1..pathno1[i]};
+param pathcount{i in T} default 0; 
+
+for {i in T,j in 1..pathno1[i]}{
+
+let pathcount[i] := pathcount[i] + 1;
+
+if pathcount[i]<=SS9count[i] then {
+	let path[i,pathcount[i]]:=SS9[i,pathcount[i]];
+	let pathcost[i,pathcount[i]]:=cost9[i,pathcount[i]];
+	}
+else if pathcount[i]>SS9count[i] and  pathcount[i]<=SS9count[i]+SS8count[i] then {  
+	let path[i,pathcount[i]]:=SS8[i,pathcount[i]-SS9count[i]];
+	let pathcost[i,pathcount[i]]:=cost8[i,pathcount[i]-SS9count[i]];
+	}
+else if pathcount[i]>SS9count[i]+SS8count[i] and  pathcount[i]<=SS9count[i]+SS8count[i]+SS7count[i] then {  
+	let path[i,pathcount[i]]:=SS7[i,pathcount[i]-SS9count[i]-SS8count[i]];
+	let pathcost[i,pathcount[i]]:=cost7[i,pathcount[i]-SS9count[i]-SS8count[i]];
+	}
+else if pathcount[i]>SS9count[i]+SS8count[i]+SS7count[i] and  pathcount[i]<=SS9count[i]+SS8count[i]+SS7count[i]+SS6count[i] then {  
+	let path[i,pathcount[i]]:=SS6[i,pathcount[i]-SS9count[i]-SS8count[i]-SS7count[i]];
+	let pathcost[i,pathcount[i]]:=cost6[i,pathcount[i]-SS9count[i]-SS8count[i]-SS7count[i]];
+	}
+else if pathcount[i]>SS9count[i]+SS8count[i]+SS7count[i]+SS6count[i] and  pathcount[i]<=SS9count[i]+SS8count[i]+SS7count[i]+SS6count[i]+SS5count[i] then {  
+	let path[i,pathcount[i]]:=SS5[i,pathcount[i]-SS9count[i]-SS8count[i]-SS7count[i]-SS6count[i]];
+	let pathcost[i,pathcount[i]]:=cost5[i,pathcount[i]-SS9count[i]-SS8count[i]-SS7count[i]-SS6count[i]];
+}
+}
+
+param pathnum1:=sum{i in T}(pathno1[i]);      #total number of taskset
+
+let ALLPATH1:=1..pathnum1 by 1;					#set of all tasksets
+
+for{j in ALLPATH1}{
+	let pathnumcount1:= pathnumcount1 + 1;
+	if pathnumcount1> pathno1[taskcount1] then {
+		let taskcount1:=taskcount1+1;
+		let pathnumcount1:= 1;
+		}
+	else let taskcount1:=taskcount1;
+ 		 let PATHSET1[j]:=path[taskcount1,pathnumcount1];
+		 let Path_time1[j]:=pathcost[taskcount1,pathnumcount1];
+		}
+
+for{j in ALLPATH1}{
+	for {i in ALLPATH}{
+		if card(PATHSET1[j] inter PATHSET[i])=card(PATHSET1[j])  and
+			card(PATHSET1[j] inter PATHSET[i])=card(PATHSET[i])   then{
+			let COMM:=COMM union {j};
+			}	}	}
+		
+let {j in ALLPATH3} PATHSET3[j]:=PATHSET1[j];
+let {j in ALLPATH3}Path_time3[j]:=Path_time1[j];
+		
+param tot_path:=card(ALLPATH)+card(ALLPATH3);
+let ALLPATH4:=1..(tot_path);
+
+for{j in 1.. card(ALLPATH4)}{
+	let pathnumcount4:= pathnumcount4 + 1;
+	if pathnumcount4<= pathnum then {
+		let PATHSET4[j]:=PATHSET[pathnumcount4];
+		 let Path_time4[j]:=Path_time[pathnumcount4];
+		}
+	else if pathnumcount4> pathnum then {
+		 let PATHSET4[j]:=PATHSET3[member((pathnumcount4-pathnum),ALLPATH3)];
+		 let Path_time4[j]:=Path_time3[member((pathnumcount4-pathnum),ALLPATH3)];
+		}
+		}
+
+for {i in T,j in ALLPATH4}{
+	if i in PATHSET4[j] then {let nbr[i,j]:=1;}
+	else let nbr[i,j]:=0;
+	}
+	
+problem MasterProblem: y, Total_cost, Fill, Assign, Time;
+	option relax_integrality 1;
+	option presolve 0;
+	option solver cplexamp, cplex_options ' mipgap 0.001';
+	
+problem PricingProblem: Use, Reduced_Cost, Assign_Limit;
+	option relax_integrality 0;
+	option presolve 1;
+
+let RMP[0]:={i in ALLPATH4: i<=pathnum};#card(PATHSET4[i])=1};
+let PSP[0]:=ALLPATH4 diff RMP[0]; 
+set rnm :={i in ALLPATH4: i<=pathnum};
+
+set OP{i in K,j in RMP[nRun]};
+param OPPO{i in K,j in RMP[nRun]};
+param RC{k in K,1..nRun} default 0;
+let nRun := 0;
+set KJ default {};	
+set NG default {};	
+param nNegRC;
+
+repeat {
+	let nRun:=nRun+1;
+	let nNegRC := 0;
+	display nRun;
+	let RMP[nRun]:=RMP[nRun-1];
+	let PSP[nRun]:=PSP[nRun-1];
+	option MasterProblem.relax_integrality 1;
+	solve MasterProblem;
+	if 	MasterProblem.result = "solved" then {
+	
+		let {i in K} price1[i,nRun] := Assign[i].dual;
+  		let {j in T} price2[j,nRun] := Fill[j].dual;
+ 		let {k in K} price3[k,nRun] := Time[k].dual;
+ 		}
+ 	else if MasterProblem.result = "infeasible" then {
+	
+		let {i in K} price1[i,nRun] := Assign[i].dunbdd;
+   		let {j in T} price2[j,nRun] := Fill[j].dunbdd;
+ 		let {k in K} price3[k,nRun] := Time[k].dunbdd;;
+ 		}
+	for {v in K} { 
+	
+		if card(PSP[nRun])!= 0 then {
+			let kk := v;	
+			solve PricingProblem;
+			display Reduced_Cost;
+			
+			if Reduced_Cost < -0.00000001  then {
+				let nNegRC := nNegRC + 1;
+				let RC[v,nRun]:=Reduced_Cost;
+				let RMP[nRun]:=RMP[nRun] union {j in PSP[nRun]:Use[j,v]=1};
+				let PSP[nRun]:=ALLPATH4 diff RMP[nRun];
+				};
+			};
+		};
+		display card(RMP[nRun]);
+		if nNegRC = 0 then break;	
+	  };
+	
+display Total_cost;
+
+option MasterProblem.relax_integrality 0;
+option MasterProblem.presolve 0;
+option solver cplexamp, cplex_options ' mipgap 0.001';
+solve MasterProblem;
+display _ampl_elapsed_time;
+let {i in K,j in RMP[nRun]}OPPO[i,j]:=y[i,j];
+let {i in K,j in RMP[nRun]:OPPO[i,j]=1}OP[i,j]:={k in T:k in PATHSET4[j]};		#set of solutions
+
+display OP;	
+display sum{i in K,j in RMP[nRun]:OPPO[i,j]=1}OPPO[i,j];
+display _total_solve_time;
+display _ampl_elapsed_time;
+display {i in K,j in RMP[nRun]:OPPO[i,j]=1}(Rent_period[i]-Path_time4[j]);
